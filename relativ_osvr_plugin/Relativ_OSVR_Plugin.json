@@ -1,4 +1,5 @@
 {
+
   "deviceVendor": "Relativty",
   "deviceName": "Relativ",
   "author": "Relativty",
@@ -14,4 +15,7 @@
   "semantic": {
     "Relativty": "tracker/0"
   }
+
 }
+
+

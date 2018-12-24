@@ -1,11 +1,28 @@
+/*
+ Relativ_OSVR_Plugin 
+ ===================
+
+ Version 0.9
+
+ This plugin is fully cross-platform compatible, & should compile under Linux, Mac or Windows
+
+ The core Relativty code was fixed & upgraded by Кзобтовский, Anorak and Justin
+
+ Requires:
+  Wills C++ serial library from https://github.com/wjwwood/serial
+  VRPS's version of jsoncpp from https://github.com/vrpn/jsoncpp
+
+  Wills C++ serial library usually requires Catkin from https://github.com/ros-gbp/catkin-release
+  jsoncpp only requires the jsoncpp amalgamated source and header folder (see the jsoncpp README.md file for details)
+*/
+
+
 // Internal Includes
+
 #include <osvr/PluginKit/PluginKit.h>
 #include <osvr/PluginKit/TrackerInterfaceC.h>
 #include <osvr/PluginKit/AnalogInterfaceC.h>
 #include <osvr/PluginKit/ButtonInterfaceC.h>
-
-//Winapi
-#include <windows.h>
 
 // Standard includes
 #include <thread>
@@ -14,11 +31,14 @@
 #include <mutex>
 
 // Third party includes
-#include <json/json.h>
+#include <jsoncpp/json/json.h>
+#include <linux/serial.h>
 #include <serial/serial.h>
 
-// Json header
-#include "Relativ_OSVR_Plugin.h"
+// Json header - Justin fixed the filename
+// PD: NOTE - there is a "Relativ_OSVR_Plugin.json" file, which needs to be in the .json file format for the code to compile properly 
+#include "Relativ_OSVR_Plugin_json.h"
+#include "Laputa_json.h"
 
 #define DEVICE_NAME "Relativ"
 
@@ -54,7 +74,9 @@ namespace {
 			serial::Serial relativ;
 			std::string last_recv;
 			try {
-				relativ.setTimeout(serial::Timeout::simpleTimeout(1000));
+				// Кзобтовский fixed the next two lines of code
+				serial::Timeout sto = serial::Timeout::simpleTimeout(1000);
+				relativ.setTimeout(sto);
 				relativ.setPort(port);
 				relativ.setBaudrate(115200);
 				while (!relativ.isOpen()) {
@@ -64,11 +86,11 @@ namespace {
 				add_msg("Connected!");
 				while (relativ.isOpen() && keep_thread_open) {
 					was_connected = true;
-					if (last_recv.size() > 0 && last_recv[0] != 0) {
-						if (GetAsyncKeyState(VK_SHIFT) != 0 && GetAsyncKeyState(VK_CONTROL) != 0 && GetAsyncKeyState(0x49) != 0) {
-							relativ.write("C\n");
-						}
-					}
+					if (last_recv.size() > 0 && last_recv[0] != 0) { 
+						if (last_recv[0] == 'C') { //Justin - the Arduino button sends down a "C" to trigger the Calibration procedure
+                                      		relativ.write("C\n");
+                                                }
+					} //Anorak added this "}" to fix the compile errors
 					last_recv = relativ.readline();
 					std::string raw_str = last_recv;
 					if (raw_str.size() > 0) {
@@ -117,6 +139,12 @@ namespace {
 								add_msg("Info: " + raw_str_d);
 							}
 						}
+						else if (raw_str[0] == 'R') {
+							if (raw_str.size() > 3) {
+								std::string raw_str_r = raw_str.substr(2, raw_str.size()); // Remove "R:"
+								add_msg("Reset: " + raw_str_r);
+							}
+						}
 						else {
 							// invalid response...
 						}
@@ -140,23 +168,23 @@ namespace {
 			OSVR_DeviceInitOptions opts = osvrDeviceCreateInitOptions(ctx);
 			osvrDeviceTrackerConfigure(opts, &m_tracker);
 			m_dev.initAsync(ctx, DEVICE_NAME, opts);
-			m_dev.sendJsonDescriptor(Relativ_OSVR_Plugin);
+			m_dev.sendJsonDescriptor(Relativ_OSVR_Plugin_json);
 			m_dev.registerUpdateCallback(this);
 
 			osvrQuatSetIdentity(&rotation_offset);
 		}
 
 		OSVR_ReturnCode update() {
+			std::string last_recv;
 			std::string next_msg;
 			while (get_last_msg(&next_msg)) {
 				osvr::pluginkit::log(m_ctx, OSVR_LOGLEVEL_NOTICE, next_msg.c_str());
 			}
 			OSVR_Quaternion ard_quat = relativ_rotation.load(std::memory_order_relaxed);
 			tracker_rotation = get_osvr_quat_from_arduino_quat(ard_quat);
-
-			if (GetAsyncKeyState(VK_SHIFT) != 0 && GetAsyncKeyState(VK_CONTROL) != 0 && GetAsyncKeyState(0x4F) != 0) {
-				rotation_offset = quatConjugate(tracker_rotation);
-			}
+				if (last_recv[0] == 'R') { // Justin - the Arduino button sends down a "C" to trigger the Reset Rotation procedure
+                            	rotation_offset = quatConjugate(tracker_rotation);
+                        }
 
 			tracker_rotation = quatMultiply(rotation_offset, tracker_rotation);
 			osvrDeviceTrackerSendOrientation(m_dev, m_tracker, &tracker_rotation, 0);
@@ -273,7 +301,7 @@ namespace {
 			if (osvrQuatGetW(&inner) > 1) { // if w>1 acos and sqrt will produce errors, this cant happen if quaternion is normalised
 				inner = quatNormalize(inner);
 			}
-			float angle = 2 * std::acosf(osvrQuatGetW(&inner));
+			float angle = 2 * __builtin_acosf(osvrQuatGetW(&inner)); //Кзобтовский fixed this code as acosf has now been moved from std to builtin
 			float s = std::sqrt(1 - osvrQuatGetW(&inner)*osvrQuatGetW(&inner)); // assuming quaternion normalised then w is less than 1, so term always positive.
 			float x, y, z;
 			if (s < 0.001) { // test to avoid divide by zero, s is always positive due to sqrt
