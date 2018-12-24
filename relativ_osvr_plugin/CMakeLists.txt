@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 2.8.12)
+set (CMAKE_CXX_STANDARD 11)
 project(OSVR_Relativty_Tracker) # Change this line.
 
 # This looks for an osvrConfig.cmake file - most of the time it can be
